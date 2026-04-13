@@ -80,6 +80,7 @@ impl FileWatcher {
                     if is_modify || is_create || is_remove {
                         for path in event.paths {
                             if !is_excluded(&path) && is_code_file(&path) {
+                                tracing::debug!(path = ?path, "File change detected");
                                 self.handler.on_file_modified(path);
                             }
                         }

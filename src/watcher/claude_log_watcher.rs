@@ -37,7 +37,6 @@ impl ClaudeLogWatcher {
     }
 
     pub async fn run(&mut self, offset_store_path: &PathBuf) -> std::io::Result<()> {
-        tracing::info!(path = ?self.file_path, "ClaudeLogWatcher started (initial_load={})", self.is_initial_load);
 
         loop {
             self.process_file().await?;
@@ -45,7 +44,6 @@ impl ClaudeLogWatcher {
             tracing::trace!(path = ?self.file_path, "Offset saved");
 
             if self.is_initial_load {
-                tracing::info!(path = ?self.file_path, "Initial load completed, now watching for changes");
                 self.is_initial_load = false;
             }
 

@@ -19,6 +19,18 @@ aiprism monitors AI coding assistant conversations and captures prompt/response 
 - Captures file diffs during the quiet period after each AI response
 - Submits collected pairs to a remote server
 
+## File Change Detection
+
+`aiprism add /path/to/project` 로 등록한 프로젝트 경로 아래의 코드 파일 변경을 감지합니다.
+
+### Watched File Extensions
+`rs`, `py`, `ts`, `tsx`, `js`, `jsx`, `go`, `java`, `c`, `cpp`, `h`, `cs`, `rb`, `swift`, `kt`, `scala`, `php`, `html`, `css`, `scss`, `toml`, `yaml`, `yml`, `md`
+
+### Excluded Directories
+`.git`, `target`, `node_modules`, `.venv`, `__pycache__`, `dist`, `build`, `workflow`, `.claude`
+
+> 감지 범위를 변경하려면 `src/watcher/file_watcher.rs`의 `CODE_EXTENSIONS`, `EXCLUDE_DIRS` 상수를 수정하세요.
+
 ## Usage
 
 ### Initialize
