@@ -25,8 +25,37 @@ impl LogParsingStrategy for ClaudeStrategy {
     }
 
     fn is_user_prompt(&self, line: &str) -> bool {
-        let result = (line.contains("\"type\":\"human\"") || line.contains("\"type\":\"user\""))
-            && line.contains("\"type\":\"text\"");
+        // 빠른 사전 필터: 최소 조건 미충족 시 JSON 파싱 생략
+        if !line.contains("\"type\":\"human\"") && !line.contains("\"type\":\"user\"") {
+            return false;
+        }
+
+        // JSON 파싱 후 message.content[] 배열에 type:text 블록이 실제로 있는지 확인
+        let v: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => return false,
+        };
+
+        let top_type = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        if top_type != "human" && top_type != "user" {
+            return false;
+        }
+
+        let result = v
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_array())
+            .map(|arr| arr.iter().any(|item| {
+                if item.get("type").and_then(|t| t.as_str()) != Some("text") {
+                    return false;
+                }
+                let t = item.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                !t.starts_with("<ide_opened_file>")
+                    && !t.starts_with("<ide_selection>")
+                    && !t.starts_with("<user-prompt-submit-hook>")
+            }))
+            .unwrap_or(false);
+
         if result {
             tracing::trace!("Claude user prompt matched");
         }
@@ -121,6 +150,14 @@ impl LogParsingStrategy for ClaudeStrategy {
             match item.get("type")?.as_str() {
                 Some("text") => {
                     if let Some(t) = item.get("text")?.as_str() {
+                        // IDE 컨텍스트 태그 블록은 유저 입력이 아니므로 제외
+                        if t.starts_with("<ide_opened_file>")
+                            || t.starts_with("<ide_selection>")
+                            || t.starts_with("<user-prompt-submit-hook>")
+                        {
+                            tracing::trace!("Skipping IDE context block");
+                            continue;
+                        }
                         text.push_str(t);
                     }
                 }

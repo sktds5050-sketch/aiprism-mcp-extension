@@ -2,6 +2,15 @@
 
 AI conversation pair collector for Claude Code and GitHub Copilot.
 
+## Agent Support Status
+
+| Agent | 대화 감지 | 파일 변경 감지 |
+|-------|----------|--------------|
+| Claude Code | ✅ 동작 | ✅ 동작 |
+| GitHub Copilot | ✅ 동작 | ❌ 미지원 |
+| Cursor | ❌ 미지원 | ❌ 미지원 |
+| Gemini CLI | ❌ 미지원 | ❌ 미지원 |
+
 ## Overview
 aiprism monitors AI coding assistant conversations and captures prompt/response pairs along with associated code changes.
 
