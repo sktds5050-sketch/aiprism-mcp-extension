@@ -83,46 +83,47 @@ impl ClaudeLogWatcher {
                 tracing::trace!(line_count = line_count, "Processed lines");
             }
 
-            if self.strategy.is_user_prompt(&line) {
-                user_prompt_count += 1;
-                if self.is_initial_load {
-                    continue;
-                }
+            let is_user = self.strategy.is_user_prompt(&line);
+            let is_completion = self.strategy.is_completion_signal(&line);
 
-                if let Some(mut metadata) = self.strategy.extract_metadata(&line) {
-                    metadata.log_file_path = self.file_path.clone();
-
-                    if let Some(text) = self.strategy.extract_user_text(&line) {
-                        tracing::info!(
-                            user_text = ?text.chars().take(200).collect::<String>(),
-                            "Claude: User prompt extracted, calling on_user_prompt"
-                        );
-                        self.pair_manager.on_user_prompt(metadata, text);
-                    } else {
-                        tracing::warn!("Claude: User text extraction failed");
-                    }
-                } else {
-                    tracing::warn!("Claude: Metadata extraction failed for user prompt");
+            if is_completion {
+                completion_count += 1;
+                if !self.is_initial_load {
+                    // completion signal = next user(human) message
+                    // flush accumulated ai text from previous assistant lines BEFORE starting new pair
+                    let ai_text = std::mem::take(&mut self.pending_ai_text);
+                    let request_id = uuid::Uuid::new_v4().to_string();
+                    tracing::info!(
+                        ai_text_len = ai_text.len(),
+                        request_id = ?request_id,
+                        "Claude: completion signal (user line), flushing ai_text"
+                    );
+                    self.pair_manager.on_completion(ai_text, request_id);
                 }
             }
 
-            if self.strategy.is_completion_signal(&line) {
-                completion_count += 1;
-                if self.is_initial_load {
-                    continue;
-                }
+            if is_user {
+                user_prompt_count += 1;
+                if !self.is_initial_load {
+                    if let Some(mut metadata) = self.strategy.extract_metadata(&line) {
+                        metadata.log_file_path = self.file_path.clone();
 
-                // completion signal = next user(human) message
-                // flush accumulated ai text from previous assistant lines
-                let ai_text = std::mem::take(&mut self.pending_ai_text);
-                let request_id = uuid::Uuid::new_v4().to_string();
-                tracing::info!(
-                    ai_text_len = ai_text.len(),
-                    request_id = ?request_id,
-                    "Claude: completion signal (user line), flushing ai_text"
-                );
-                self.pair_manager.on_completion(ai_text, request_id);
-            } else if line.contains("\"type\":\"assistant\"") {
+                        if let Some(text) = self.strategy.extract_user_text(&line) {
+                            tracing::info!(
+                                user_text = ?text.chars().take(200).collect::<String>(),
+                                "Claude: User prompt extracted, calling on_user_prompt"
+                            );
+                            self.pair_manager.on_user_prompt(metadata, text);
+                        } else {
+                            tracing::warn!("Claude: User text extraction failed");
+                        }
+                    } else {
+                        tracing::warn!("Claude: Metadata extraction failed for user prompt");
+                    }
+                }
+            }
+
+            if !is_completion && line.contains("\"type\":\"assistant\"") {
                 if !self.is_initial_load {
                     if let Some(text) = self.strategy.extract_ai_text(&line) {
                         self.pending_ai_text.push_str(&text);
