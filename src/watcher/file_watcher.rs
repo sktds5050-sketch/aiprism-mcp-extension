@@ -4,24 +4,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::fs;
 
-/// Excluded directories to ignore file changes
-const EXCLUDE_DIRS: &[&str] = &[
-    ".git", "target", "node_modules", ".venv",
-    "__pycache__", "dist", "build", "workflow", ".claude",
-];
-
-/// Code file extensions to watch
-const CODE_EXTENSIONS: &[&str] = &[
-    "rs", "py", "ts", "tsx", "js", "jsx", "go", "java", "c", "cpp", "h",
-    "cs", "rb", "swift", "kt", "scala", "php", "html", "css", "scss",
-    "toml", "yaml", "yml", "md",
-];
-
 /// Check if a path is in an excluded directory
-pub fn is_excluded(path: &Path) -> bool {
+pub fn is_excluded(path: &Path, exclude_dirs: &[String]) -> bool {
     path.components().any(|c| {
         if let Some(os_str) = c.as_os_str().to_str() {
-            EXCLUDE_DIRS.contains(&os_str)
+            exclude_dirs.iter().any(|d| d == os_str)
         } else {
             false
         }
@@ -29,10 +16,10 @@ pub fn is_excluded(path: &Path) -> bool {
 }
 
 /// Check if a file has a code extension
-pub fn is_code_file(path: &Path) -> bool {
+pub fn is_code_file(path: &Path, extensions: &[String]) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext| CODE_EXTENSIONS.contains(&ext))
+        .map(|ext| extensions.iter().any(|e| e == ext))
         .unwrap_or(false)
 }
 
@@ -45,13 +32,22 @@ pub trait FileChangeHandler: Send + Sync {
 pub struct FileWatcher {
     source_roots: Vec<PathBuf>,
     handler: Arc<dyn FileChangeHandler>,
+    extensions: Vec<String>,
+    exclude_dirs: Vec<String>,
 }
 
 impl FileWatcher {
-    pub fn new(source_roots: Vec<PathBuf>, handler: Arc<dyn FileChangeHandler>) -> Self {
+    pub fn new(
+        source_roots: Vec<PathBuf>,
+        handler: Arc<dyn FileChangeHandler>,
+        extensions: Vec<String>,
+        exclude_dirs: Vec<String>,
+    ) -> Self {
         Self {
             source_roots,
             handler,
+            extensions,
+            exclude_dirs,
         }
     }
 
@@ -79,7 +75,7 @@ impl FileWatcher {
                     let is_remove = matches!(event.kind, EventKind::Remove(_));
                     if is_modify || is_create || is_remove {
                         for path in event.paths {
-                            if !is_excluded(&path) && is_code_file(&path) {
+                            if !is_excluded(&path, &self.exclude_dirs) && is_code_file(&path, &self.extensions) {
                                 tracing::debug!(path = ?path, "File change detected");
                                 self.handler.on_file_modified(path);
                             }
@@ -101,41 +97,50 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use std::sync::Mutex;
+    use crate::config::{DEFAULT_EXTENSIONS, DEFAULT_EXCLUDE_DIRS};
+
+    fn default_extensions() -> Vec<String> {
+        DEFAULT_EXTENSIONS.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn default_excludes() -> Vec<String> {
+        DEFAULT_EXCLUDE_DIRS.iter().map(|s| s.to_string()).collect()
+    }
 
     #[test]
     fn excludes_target_directory() {
-        assert!(is_excluded(Path::new("/proj/target/debug/foo.rs")));
+        assert!(is_excluded(Path::new("/proj/target/debug/foo.rs"), &default_excludes()));
     }
 
     #[test]
     fn excludes_node_modules() {
-        assert!(is_excluded(Path::new("/proj/node_modules/pkg/index.js")));
+        assert!(is_excluded(Path::new("/proj/node_modules/pkg/index.js"), &default_excludes()));
     }
 
     #[test]
     fn excludes_git_directory() {
-        assert!(is_excluded(Path::new("/proj/.git/objects/abc123")));
+        assert!(is_excluded(Path::new("/proj/.git/objects/abc123"), &default_excludes()));
     }
 
     #[test]
     fn allows_non_excluded_paths() {
-        assert!(!is_excluded(Path::new("/proj/src/main.rs")));
+        assert!(!is_excluded(Path::new("/proj/src/main.rs"), &default_excludes()));
     }
 
     #[test]
     fn allows_filename_with_excluded_word() {
         // "target" in filename should not trigger exclusion
-        assert!(!is_excluded(Path::new("/proj/src/target_utils.rs")));
+        assert!(!is_excluded(Path::new("/proj/src/target_utils.rs"), &default_excludes()));
     }
 
     #[test]
     fn excludes_venv() {
-        assert!(is_excluded(Path::new("/proj/.venv/lib/site.py")));
+        assert!(is_excluded(Path::new("/proj/.venv/lib/site.py"), &default_excludes()));
     }
 
     #[test]
     fn excludes_pycache() {
-        assert!(is_excluded(Path::new("/proj/__pycache__/module.cpython-39.pyc")));
+        assert!(is_excluded(Path::new("/proj/__pycache__/module.cpython-39.pyc"), &default_excludes()));
     }
 
     // Mock handler for testing
@@ -168,7 +173,7 @@ mod tests {
         fs::write(&test_file, "fn main() {}").unwrap();
 
         let handler = Arc::new(MockHandler::new());
-        let watcher = FileWatcher::new(vec![dir.path().to_path_buf()], handler.clone());
+        let watcher = FileWatcher::new(vec![dir.path().to_path_buf()], handler.clone(), default_extensions(), default_excludes());
 
         // Start watcher in background
         let watcher_task = tokio::spawn(async move {
@@ -201,7 +206,7 @@ mod tests {
         fs::write(&target_file, "binary").unwrap();
 
         let handler = Arc::new(MockHandler::new());
-        let watcher = FileWatcher::new(vec![dir.path().to_path_buf()], handler.clone());
+        let watcher = FileWatcher::new(vec![dir.path().to_path_buf()], handler.clone(), default_extensions(), default_excludes());
 
         let watcher_task = tokio::spawn(async move {
             let _ = watcher.run().await;

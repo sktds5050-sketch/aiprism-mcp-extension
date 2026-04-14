@@ -7,4 +7,4 @@ pub mod file_watcher;
 pub use log_watcher::{OffsetStore, PairManagerTrait};
 pub use claude_log_watcher::ClaudeLogWatcher;
 pub use copilot_log_watcher::CopilotLogWatcher;
-pub use file_watcher::{FileWatcher, FileChangeHandler, is_excluded};
+pub use file_watcher::{FileWatcher, FileChangeHandler};

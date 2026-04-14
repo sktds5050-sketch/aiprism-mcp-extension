@@ -4,6 +4,7 @@ pub mod diff;
 use crate::models::{Pair, ActivePair, PairMetadata};
 use crate::watcher::FileChangeHandler;
 use crate::watcher::file_watcher::{is_excluded, is_code_file};
+use crate::config::{DEFAULT_EXTENSIONS, DEFAULT_EXCLUDE_DIRS};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -256,12 +257,14 @@ fn collect_snapshots_recursive(dir: &PathBuf, snapshots: &mut HashMap<PathBuf, S
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if is_excluded(&path) {
+        let exclude_dirs: Vec<String> = DEFAULT_EXCLUDE_DIRS.iter().map(|s| s.to_string()).collect();
+        let extensions: Vec<String> = DEFAULT_EXTENSIONS.iter().map(|s| s.to_string()).collect();
+        if is_excluded(&path, &exclude_dirs) {
             continue;
         }
         if path.is_dir() {
             collect_snapshots_recursive(&path, snapshots);
-        } else if path.is_file() && is_code_file(&path) {
+        } else if path.is_file() && is_code_file(&path, &extensions) {
             // Skip files larger than 1MB
             if let Ok(meta) = std::fs::metadata(&path) {
                 if meta.len() > 1_000_000 {

@@ -23,13 +23,13 @@ aiprism monitors AI coding assistant conversations and captures prompt/response 
 
 `aiprism add /path/to/project` 로 등록한 프로젝트 경로 아래의 코드 파일 변경을 감지합니다.
 
-### Watched File Extensions
+`aiprism init` 시 기본값이 `~/.aiprism/config.json`에 저장되며, 이후 직접 수정하여 커스터마이징할 수 있습니다.
+
+### Watched File Extensions (`watch_extensions`)
 `rs`, `py`, `ts`, `tsx`, `js`, `jsx`, `go`, `java`, `c`, `cpp`, `h`, `cs`, `rb`, `swift`, `kt`, `scala`, `php`, `html`, `css`, `scss`, `toml`, `yaml`, `yml`, `md`
 
-### Excluded Directories
+### Excluded Directories (`exclude_dirs`)
 `.git`, `target`, `node_modules`, `.venv`, `__pycache__`, `dist`, `build`, `workflow`, `.claude`
-
-> 감지 범위를 변경하려면 `src/watcher/file_watcher.rs`의 `CODE_EXTENSIONS`, `EXCLUDE_DIRS` 상수를 수정하세요.
 
 ## Usage
 

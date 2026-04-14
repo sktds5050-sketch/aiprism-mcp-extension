@@ -4,6 +4,17 @@ use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_BASE_URL: &str = "https://aiprism.dsj.co.kr";
 
+pub const DEFAULT_EXTENSIONS: &[&str] = &[
+    "rs", "py", "ts", "tsx", "js", "jsx", "go", "java", "c", "cpp", "h",
+    "cs", "rb", "swift", "kt", "scala", "php", "html", "css", "scss",
+    "toml", "yaml", "yml", "md",
+];
+
+pub const DEFAULT_EXCLUDE_DIRS: &[&str] = &[
+    ".git", "target", "node_modules", ".venv",
+    "__pycache__", "dist", "build", "workflow", ".claude",
+];
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub api_token: String,
@@ -12,10 +23,22 @@ pub struct Config {
     pub source_roots: Vec<PathBuf>,
     #[serde(default = "default_quiet_period")]
     pub quiet_period_secs: u64,
+    #[serde(default = "default_watch_extensions")]
+    pub watch_extensions: Vec<String>,
+    #[serde(default = "default_exclude_dirs")]
+    pub exclude_dirs: Vec<String>,
 }
 
 fn default_quiet_period() -> u64 {
     60
+}
+
+fn default_watch_extensions() -> Vec<String> {
+    DEFAULT_EXTENSIONS.iter().map(|s| s.to_string()).collect()
+}
+
+fn default_exclude_dirs() -> Vec<String> {
+    DEFAULT_EXCLUDE_DIRS.iter().map(|s| s.to_string()).collect()
 }
 
 impl Config {
@@ -147,6 +170,8 @@ mod tests {
             base_url: "https://api.example.com".to_string(),
             source_roots: vec![],
             quiet_period_secs: 30,
+            watch_extensions: default_watch_extensions(),
+            exclude_dirs: default_exclude_dirs(),
         };
         let content = serde_json::to_string_pretty(&config).unwrap();
 
@@ -171,6 +196,8 @@ mod tests {
             base_url: "https://new.com".to_string(),
             source_roots: vec![],
             quiet_period_secs: 30,
+            watch_extensions: default_watch_extensions(),
+            exclude_dirs: default_exclude_dirs(),
         };
         let content = serde_json::to_string_pretty(&new_config).unwrap();
         fs::write(&config_path, content).unwrap();
@@ -192,6 +219,8 @@ mod tests {
             base_url: "https://api.example.com".to_string(),
             source_roots: vec![],
             quiet_period_secs: 30,
+            watch_extensions: default_watch_extensions(),
+            exclude_dirs: default_exclude_dirs(),
         };
         let content = serde_json::to_string_pretty(&config).unwrap();
         fs::write(&config_path, content).unwrap();
@@ -216,6 +245,8 @@ mod tests {
             base_url: "https://api.example.com".to_string(),
             source_roots: vec![],
             quiet_period_secs: 30,
+            watch_extensions: default_watch_extensions(),
+            exclude_dirs: default_exclude_dirs(),
         };
 
         // When: validate 호출
@@ -233,6 +264,8 @@ mod tests {
             base_url: "https://api.example.com".to_string(),
             source_roots: vec![],
             quiet_period_secs: 30,
+            watch_extensions: default_watch_extensions(),
+            exclude_dirs: default_exclude_dirs(),
         };
 
         // When: validate 호출
@@ -263,6 +296,8 @@ mod cli_tests {
             base_url: "https://api.example.com".to_string(),
             source_roots: vec![],
             quiet_period_secs: 30,
+            watch_extensions: default_watch_extensions(),
+            exclude_dirs: default_exclude_dirs(),
         };
         config.validate().unwrap();
 
@@ -285,6 +320,8 @@ mod cli_tests {
             base_url: "https://api.example.com".to_string(),
             source_roots: vec![],
             quiet_period_secs: 30,
+            watch_extensions: default_watch_extensions(),
+            exclude_dirs: default_exclude_dirs(),
         };
 
         // When: validate 호출

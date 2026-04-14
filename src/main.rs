@@ -17,8 +17,10 @@ use strategy::PathStrategy;
 use strategy::log::{ClaudeStrategy, CopilotStrategy};
 use std::sync::Arc;
 use std::path::PathBuf;
+use std::collections::HashSet;
 use tracing_subscriber;
 use walkdir::WalkDir;
+use notify::{Watcher, RecursiveMode, EventKind};
 
 #[derive(Parser)]
 #[command(name = "aiprism-local")]
@@ -113,6 +115,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             base_url: base_url.unwrap_or_else(|| DEFAULT_BASE_URL.to_string()),
             source_roots: vec![],
             quiet_period_secs: 30,
+            watch_extensions: config::DEFAULT_EXTENSIONS.iter().map(|s| s.to_string()).collect(),
+            exclude_dirs: config::DEFAULT_EXCLUDE_DIRS.iter().map(|s| s.to_string()).collect(),
         };
 
         config.validate()?;
@@ -168,7 +172,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(handler_task);
 
     // 5. Start file watcher
-    let fw = FileWatcher::new(config.source_roots.clone(), Arc::new(handler));
+    let fw = FileWatcher::new(config.source_roots.clone(), Arc::new(handler), config.watch_extensions.clone(), config.exclude_dirs.clone());
     tokio::spawn(async move {
         if let Err(e) = fw.run().await {
             tracing::error!("File watcher error: {}", e);
@@ -204,7 +208,7 @@ async fn start_all_watchers(
             continue;
         }
 
-        // Walk directory recursively for .jsonl files
+        // 1. 기존 파일 처리
         let jsonl_files: Vec<PathBuf> = WalkDir::new(&dir_path)
             .into_iter()
             .filter_map(|e| e.ok())
@@ -216,49 +220,104 @@ async fn start_all_watchers(
         tracing::info!("Found {} .jsonl files for agent '{}'", jsonl_files.len(), agent_name);
 
         for file_path in jsonl_files {
-            // Create per-file adapter
-            let (adapter, adapter_task) = PairManagerAdapter::new(pair_manager.clone());
-            tokio::spawn(adapter_task);
+            spawn_log_watcher(agent_name.as_str(), file_path, pair_manager.clone(), offsets.clone(), offset_store_path.clone());
+        }
 
-            match agent_name.as_str() {
-                "claudecode" => {
-                    let strategy = Arc::new(ClaudeStrategy);
-                    let mut watcher = ClaudeLogWatcher::new(
-                        file_path.clone(),
-                        strategy,
-                        Arc::new(adapter),
-                        offsets.clone(),
-                    );
+        // 2. 신규 파일 감시
+        let pm = pair_manager.clone();
+        let offsets_clone = offsets.clone();
+        let offset_path_clone = offset_store_path.clone();
+        let agent = agent_name.clone();
 
-                    let offset_path_clone = offset_store_path.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = watcher.run(&offset_path_clone).await {
-                            tracing::error!("Claude log watcher error for {:?}: {}", file_path, e);
-                        }
-                    });
-                }
-                "GitHub Copilot" => {
-                    let strategy = Arc::new(CopilotStrategy);
-                    let mut watcher = CopilotLogWatcher::new(
-                        file_path.clone(),
-                        strategy,
-                        Arc::new(adapter),
-                        offsets.clone(),
-                    );
+        tokio::spawn(async move {
+            watch_for_new_log_files(dir_path, agent, pm, offsets_clone, offset_path_clone).await;
+        });
+    }
 
-                    let offset_path_clone = offset_store_path.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = watcher.run(&offset_path_clone).await {
-                            tracing::error!("Copilot log watcher error for {:?}: {}", file_path, e);
-                        }
-                    });
-                }
-                other => {
-                    tracing::warn!("Unknown agent: {}, skipping", other);
+    Ok(())
+}
+
+async fn watch_for_new_log_files(
+    dir_path: PathBuf,
+    agent_name: String,
+    pair_manager: Arc<PairManager>,
+    offsets: OffsetStore,
+    offset_store_path: PathBuf,
+) {
+    let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+
+    let mut watcher = match notify::recommended_watcher(move |res| {
+        let _ = tx.blocking_send(res);
+    }) {
+        Ok(w) => w,
+        Err(e) => {
+            tracing::error!("Failed to create log dir watcher for {:?}: {}", dir_path, e);
+            return;
+        }
+    };
+
+    if let Err(e) = watcher.watch(&dir_path, RecursiveMode::Recursive) {
+        tracing::error!("Failed to watch log dir {:?}: {}", dir_path, e);
+        return;
+    }
+
+    tracing::info!(dir = ?dir_path, agent = %agent_name, "Watching for new log files");
+
+    let mut seen: HashSet<PathBuf> = HashSet::new();
+
+    while let Some(Ok(event)) = rx.recv().await {
+        if matches!(event.kind, EventKind::Create(_)) {
+            for path in event.paths {
+                if path.extension().map(|e| e == "jsonl").unwrap_or(false) && seen.insert(path.clone()) {
+                    tracing::info!(path = ?path, agent = %agent_name, "New log file detected, spawning watcher");
+                    spawn_log_watcher(agent_name.as_str(), path, pair_manager.clone(), offsets.clone(), offset_store_path.clone());
                 }
             }
         }
     }
+}
 
-    Ok(())
+fn spawn_log_watcher(
+    agent_name: &str,
+    file_path: PathBuf,
+    pair_manager: Arc<PairManager>,
+    offsets: OffsetStore,
+    offset_store_path: PathBuf,
+) {
+    let (adapter, adapter_task) = PairManagerAdapter::new(pair_manager);
+    tokio::spawn(adapter_task);
+
+    match agent_name {
+        "claudecode" => {
+            let strategy = Arc::new(ClaudeStrategy);
+            let mut watcher = ClaudeLogWatcher::new(
+                file_path.clone(),
+                strategy,
+                Arc::new(adapter),
+                offsets,
+            );
+            tokio::spawn(async move {
+                if let Err(e) = watcher.run(&offset_store_path).await {
+                    tracing::error!("Claude log watcher error for {:?}: {}", file_path, e);
+                }
+            });
+        }
+        "GitHub Copilot" => {
+            let strategy = Arc::new(CopilotStrategy);
+            let mut watcher = CopilotLogWatcher::new(
+                file_path.clone(),
+                strategy,
+                Arc::new(adapter),
+                offsets,
+            );
+            tokio::spawn(async move {
+                if let Err(e) = watcher.run(&offset_store_path).await {
+                    tracing::error!("Copilot log watcher error for {:?}: {}", file_path, e);
+                }
+            });
+        }
+        other => {
+            tracing::warn!("Unknown agent: {}, skipping", other);
+        }
+    }
 }
